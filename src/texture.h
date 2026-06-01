@@ -1,62 +1,105 @@
-//==================================================================================================
-// Written in 2016 by Peter Shirley <ptrshrl@gmail.com>
+#ifndef TEXTURE_H
+#define TEXTURE_H
+//==============================================================================================
+// Originally written in 2016 by Peter Shirley <ptrshrl@gmail.com>
 //
 // To the extent possible under law, the author(s) have dedicated all copyright and related and
-// neighboring rights to this software to the public domain worldwide. This software is distributed
-// without any warranty.
+// neighboring rights to this software to the public domain worldwide. This software is
+// distributed without any warranty.
 //
-// You should have received a copy (see file COPYING.txt) of the CC0 Public Domain Dedication along
-// with this software. If not, see <http://creativecommons.org/publicdomain/zero/1.0/>.
-//==================================================================================================
-
-#ifndef TEXTUREH
-#define TEXTUREH
+// You should have received a copy (see file COPYING.txt) of the CC0 Public Domain Dedication
+// along with this software. If not, see <http://creativecommons.org/publicdomain/zero/1.0/>.
+//==============================================================================================
 
 #include "perlin.h"
+#include "rtw_stb_image.h"
 
-class texture  {
-    public:
-        virtual vec3 value(float u, float v, const vec3& p) const = 0;
+
+class texture {
+  public:
+    virtual ~texture() = default;
+
+    virtual color value(double u, double v, const point3& p) const = 0;
 };
 
-class constant_texture : public texture {
-    public:
-        constant_texture() { }
-        constant_texture(vec3 c) : color(c) { }
-        virtual vec3 value(float u, float v, const vec3& p) const {
-            return color;
-        }
-        vec3 color;
+
+class solid_color : public texture {
+  public:
+    solid_color(const color& albedo) : albedo(albedo) {}
+
+    solid_color(double red, double green, double blue) : solid_color(color(red,green,blue)) {}
+
+    color value(double u, double v, const point3& p) const override {
+        return albedo;
+    }
+
+  private:
+    color albedo;
 };
+
 
 class checker_texture : public texture {
-    public:
-        checker_texture() { }
-        checker_texture(texture *t0, texture *t1): even(t0), odd(t1) { }
-        virtual vec3 value(float u, float v, const vec3& p) const {
-            float sines = sin(10*p.x())*sin(10*p.y())*sin(10*p.z());
-            if (sines < 0)
-                return odd->value(u, v, p);
-            else
-                return even->value(u, v, p);
-        }
-        texture *odd;
-        texture *even;
+  public:
+    checker_texture(double scale, shared_ptr<texture> even, shared_ptr<texture> odd)
+      : inv_scale(1.0 / scale), even(even), odd(odd) {}
+
+    checker_texture(double scale, const color& c1, const color& c2)
+      : checker_texture(scale, make_shared<solid_color>(c1), make_shared<solid_color>(c2)) {}
+
+    color value(double u, double v, const point3& p) const override {
+        auto xInteger = int(std::floor(inv_scale * p.x()));
+        auto yInteger = int(std::floor(inv_scale * p.y()));
+        auto zInteger = int(std::floor(inv_scale * p.z()));
+
+        bool isEven = (xInteger + yInteger + zInteger) % 2 == 0;
+
+        return isEven ? even->value(u, v, p) : odd->value(u, v, p);
+    }
+
+  private:
+    double inv_scale;
+    shared_ptr<texture> even;
+    shared_ptr<texture> odd;
+};
+
+
+class image_texture : public texture {
+  public:
+    image_texture(const char* filename) : image(filename) {}
+
+    color value(double u, double v, const point3& p) const override {
+        // If we have no texture data, then return solid cyan as a debugging aid.
+        if (image.height() <= 0) return color(0,1,1);
+
+        // Clamp input texture coordinates to [0,1] x [1,0]
+        u = interval(0,1).clamp(u);
+        v = 1.0 - interval(0,1).clamp(v);  // Flip V to image coordinates
+
+        auto i = int(u * image.width());
+        auto j = int(v * image.height());
+        auto pixel = image.pixel_data(i,j);
+
+        auto color_scale = 1.0 / 255.0;
+        return color(color_scale*pixel[0], color_scale*pixel[1], color_scale*pixel[2]);
+    }
+
+  private:
+    rtw_image image;
 };
 
 
 class noise_texture : public texture {
-    public:
-        noise_texture() {}
-        noise_texture(float sc) : scale(sc) {}
-        virtual vec3 value(float u, float v, const vec3& p) const {
-//            return vec3(1,1,1)*0.5*(1 + noise.turb(scale * p));
-//            return vec3(1,1,1)*noise.turb(scale * p);
-              return vec3(1,1,1)*0.5*(1 + sin(scale*p.x() + 5*noise.turb(scale*p))) ;
-        }
-        perlin noise;
-        float scale;
+  public:
+    noise_texture(double scale) : scale(scale) {}
+
+    color value(double u, double v, const point3& p) const override {
+        return color(.5, .5, .5) * (1 + std::sin(scale * p.z() + 10 * noise.turb(p, 7)));
+    }
+
+  private:
+    perlin noise;
+    double scale;
 };
 
-#endif
 
+#endif

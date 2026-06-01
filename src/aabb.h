@@ -1,77 +1,110 @@
-//==================================================================================================
-// Written in 2016 by Peter Shirley <ptrshrl@gmail.com>
+#ifndef AABB_H
+#define AABB_H
+//==============================================================================================
+// Originally written in 2016 by Peter Shirley <ptrshrl@gmail.com>
 //
 // To the extent possible under law, the author(s) have dedicated all copyright and related and
-// neighboring rights to this software to the public domain worldwide. This software is distributed
-// without any warranty.
+// neighboring rights to this software to the public domain worldwide. This software is
+// distributed without any warranty.
 //
-// You should have received a copy (see file COPYING.txt) of the CC0 Public Domain Dedication along
-// with this software. If not, see <http://creativecommons.org/publicdomain/zero/1.0/>.
-//==================================================================================================
+// You should have received a copy (see file COPYING.txt) of the CC0 Public Domain Dedication
+// along with this software. If not, see <http://creativecommons.org/publicdomain/zero/1.0/>.
+//==============================================================================================
 
-#ifndef AABBH
-#define AABBH
-#include "ray.h"
-#include "hitable.h"
-
-inline float ffmin(float a, float b) { return a < b ? a : b; }
-inline float ffmax(float a, float b) { return a > b ? a : b; }
 
 class aabb {
-    public:
-        aabb() {}
-        aabb(const vec3& a, const vec3& b) { _min = a; _max = b;}
+  public:
+    interval x, y, z;
 
-        vec3 min() const {return _min; }
-        vec3 max() const {return _max; }
+    aabb() {} // The default AABB is empty, since intervals are empty by default.
 
-        bool hit(const ray& r, float tmin, float tmax) const {
-            for (int a = 0; a < 3; a++) {
-                float t0 = ffmin((_min[a] - r.origin()[a]) / r.direction()[a],
-                                (_max[a] - r.origin()[a]) / r.direction()[a]);
-                float t1 = ffmax((_min[a] - r.origin()[a]) / r.direction()[a],
-                                (_max[a] - r.origin()[a]) / r.direction()[a]);
-                tmin = ffmax(t0, tmin);
-                tmax = ffmin(t1, tmax);
-                if (tmax <= tmin)
-                    return false;
+    aabb(const interval& x, const interval& y, const interval& z)
+      : x(x), y(y), z(z)
+    {
+        pad_to_minimums();
+    }
+
+    aabb(const point3& a, const point3& b) {
+        // Treat the two points a and b as extrema for the bounding box, so we don't require a
+        // particular minimum/maximum coordinate order.
+
+        x = (a[0] <= b[0]) ? interval(a[0], b[0]) : interval(b[0], a[0]);
+        y = (a[1] <= b[1]) ? interval(a[1], b[1]) : interval(b[1], a[1]);
+        z = (a[2] <= b[2]) ? interval(a[2], b[2]) : interval(b[2], a[2]);
+
+        pad_to_minimums();
+    }
+
+    aabb(const aabb& box0, const aabb& box1) {
+        x = interval(box0.x, box1.x);
+        y = interval(box0.y, box1.y);
+        z = interval(box0.z, box1.z);
+    }
+
+    const interval& axis_interval(int n) const {
+        if (n == 1) return y;
+        if (n == 2) return z;
+        return x;
+    }
+
+    bool hit(const ray& r, interval ray_t) const {
+        const point3& ray_orig = r.origin();
+        const vec3&   ray_dir  = r.direction();
+
+        for (int axis = 0; axis < 3; axis++) {
+            const interval& ax = axis_interval(axis);
+            const double adinv = 1.0 / ray_dir[axis];
+
+            auto t0 = (ax.min - ray_orig[axis]) * adinv;
+            auto t1 = (ax.max - ray_orig[axis]) * adinv;
+
+            if (t0 < t1) {
+                if (t0 > ray_t.min) ray_t.min = t0;
+                if (t1 < ray_t.max) ray_t.max = t1;
+            } else {
+                if (t1 > ray_t.min) ray_t.min = t1;
+                if (t0 < ray_t.max) ray_t.max = t0;
             }
-            return true;
-        }
 
-        float area() const {
-               float a = _max.x() - _min.x();
-               float b = _max.y() - _min.y();
-               float c = _max.z() - _min.z();
-               return 2*(a*b + b*c + c*a);
+            if (ray_t.max <= ray_t.min)
+                return false;
         }
+        return true;
+    }
 
-        int longest_axis() const {
-               float a = _max.x() - _min.x();
-               float b = _max.y() - _min.y();
-               float c = _max.z() - _min.z();
-               if (a > b && a > c)
-                   return 0;
-               else if (b > c)
-                   return 1;
-               else
-                   return 2;
-        }
+    int longest_axis() const {
+        // Returns the index of the longest axis of the bounding box.
 
-        vec3 _min;
-        vec3 _max;
+        if (x.size() > y.size())
+            return x.size() > z.size() ? 0 : 2;
+        else
+            return y.size() > z.size() ? 1 : 2;
+    }
+
+    static const aabb empty, universe;
+
+  private:
+
+    void pad_to_minimums() {
+        // Adjust the AABB so that no side is narrower than some delta, padding if necessary.
+
+        double delta = 0.0001;
+        if (x.size() < delta) x = x.expand(delta);
+        if (y.size() < delta) y = y.expand(delta);
+        if (z.size() < delta) z = z.expand(delta);
+    }
 };
 
-aabb surrounding_box(aabb box0, aabb box1) {
-    vec3 small( fmin(box0.min().x(), box1.min().x()),
-                fmin(box0.min().y(), box1.min().y()),
-                fmin(box0.min().z(), box1.min().z()));
-    vec3 big  ( fmax(box0.max().x(), box1.max().x()),
-                fmax(box0.max().y(), box1.max().y()),
-                fmax(box0.max().z(), box1.max().z()));
-    return aabb(small,big);
+const aabb aabb::empty    = aabb(interval::empty,    interval::empty,    interval::empty);
+const aabb aabb::universe = aabb(interval::universe, interval::universe, interval::universe);
+
+aabb operator+(const aabb& bbox, const vec3& offset) {
+    return aabb(bbox.x + offset.x(), bbox.y + offset.y(), bbox.z + offset.z());
+}
+
+aabb operator+(const vec3& offset, const aabb& bbox) {
+    return bbox + offset;
 }
 
 
 #endif
-

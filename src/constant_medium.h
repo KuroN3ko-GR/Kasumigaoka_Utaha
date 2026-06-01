@@ -1,61 +1,75 @@
-//==================================================================================================
-// Written in 2016 by Peter Shirley <ptrshrl@gmail.com>
+#ifndef CONSTANT_MEDIUM_H
+#define CONSTANT_MEDIUM_H
+//==============================================================================================
+// Originally written in 2016 by Peter Shirley <ptrshrl@gmail.com>
 //
 // To the extent possible under law, the author(s) have dedicated all copyright and related and
-// neighboring rights to this software to the public domain worldwide. This software is distributed
-// without any warranty.
+// neighboring rights to this software to the public domain worldwide. This software is
+// distributed without any warranty.
 //
-// You should have received a copy (see file COPYING.txt) of the CC0 Public Domain Dedication along
-// with this software. If not, see <http://creativecommons.org/publicdomain/zero/1.0/>.
-//==================================================================================================
+// You should have received a copy (see file COPYING.txt) of the CC0 Public Domain Dedication
+// along with this software. If not, see <http://creativecommons.org/publicdomain/zero/1.0/>.
+//==============================================================================================
 
-#ifndef CMEDH
-#define CMEDH
+#include "hittable.h"
+#include "material.h"
+#include "texture.h"
 
-#include "hitable.h"
-#include <float.h>
 
-class constant_medium : public hitable  {
-    public:
-        constant_medium(hitable *b, float d, texture *a) : boundary(b), density(d) { phase_function = new isotropic(a); }
-        virtual bool hit(const ray& r, float t_min, float t_max, hit_record& rec) const;
-        virtual bool bounding_box(float t0, float t1, aabb& box) const { 
-            return boundary->bounding_box(t0, t1, box); }
-        hitable *boundary;
-        float density;
-        material *phase_function;
+class constant_medium : public hittable {
+  public:
+    constant_medium(shared_ptr<hittable> boundary, double density, shared_ptr<texture> tex)
+      : boundary(boundary), neg_inv_density(-1/density),
+        phase_function(make_shared<isotropic>(tex))
+    {}
+
+    constant_medium(shared_ptr<hittable> boundary, double density, const color& albedo)
+      : boundary(boundary), neg_inv_density(-1/density),
+        phase_function(make_shared<isotropic>(albedo))
+    {}
+
+    bool hit(const ray& r, interval ray_t, hit_record& rec) const override {
+        hit_record rec1, rec2;
+
+        if (!boundary->hit(r, interval::universe, rec1))
+            return false;
+
+        if (!boundary->hit(r, interval(rec1.t+0.0001, infinity), rec2))
+            return false;
+
+        if (rec1.t < ray_t.min) rec1.t = ray_t.min;
+        if (rec2.t > ray_t.max) rec2.t = ray_t.max;
+
+        if (rec1.t >= rec2.t)
+            return false;
+
+        if (rec1.t < 0)
+            rec1.t = 0;
+
+        auto ray_length = r.direction().length();
+        auto distance_inside_boundary = (rec2.t - rec1.t) * ray_length;
+        auto hit_distance = neg_inv_density * std::log(random_double());
+
+        if (hit_distance > distance_inside_boundary)
+            return false;
+
+        rec.t = rec1.t + hit_distance / ray_length;
+        rec.p = r.at(rec.t);
+
+        rec.normal = vec3(1,0,0);  // arbitrary
+        rec.front_face = true;     // also arbitrary
+        rec.mat = phase_function;
+
+        return true;
+    }
+
+    aabb bounding_box() const override { return boundary->bounding_box(); }
+
+  private:
+    shared_ptr<hittable> boundary;
+    double neg_inv_density;
+    shared_ptr<material> phase_function;
 };
 
-bool constant_medium::hit(const ray& r, float t_min, float t_max, hit_record& rec) const {
-    bool db = (drand48() < 0.00001);
-    db = false;
-    hit_record rec1, rec2;
-    if (boundary->hit(r, -FLT_MAX, FLT_MAX, rec1)) { 
-        if (boundary->hit(r, rec1.t+0.0001, FLT_MAX, rec2)) {
-    if (db) std::cerr << "\nt0 t1 " << rec1.t << " " << rec2.t << "\n";
-            if (rec1.t < t_min)
-                rec1.t = t_min;
-            if (rec2.t > t_max)
-                rec2.t = t_max;
-            if (rec1.t >= rec2.t)
-                return false;
-            if (rec1.t < 0)
-                rec1.t = 0;
-            float distance_inside_boundary = (rec2.t - rec1.t)*r.direction().length();
-            float hit_distance = -(1/density)*log(drand48()); 
-            if (hit_distance < distance_inside_boundary) {
-            if (db) std::cerr << "hit_distance = " <<  hit_distance << "\n";
-                rec.t = rec1.t + hit_distance / r.direction().length(); 
-            if (db) std::cerr << "rec.t = " <<  rec.t << "\n";
-                rec.p = r.point_at_parameter(rec.t);
-            if (db) std::cerr << "rec.p = " <<  rec.p << "\n";
-                rec.normal = vec3(1,0,0);  // arbitrary
-                rec.mat_ptr = phase_function;
-                return true;
-            }
-        }
-    }
-    return false;
-}
 
 #endif
