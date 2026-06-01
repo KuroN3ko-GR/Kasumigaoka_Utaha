@@ -1,0 +1,32 @@
+# Build
+bin/
+obj/
+Debug/
+Release/
+x64/
+x86/
+out/
+build/
+
+# VS
+.vs/
+*.user
+*.suo
+*.ncb
+*.opensdf
+*.sdf
+*.cachefile
+*.VC.db
+*.VC.opendb
+
+# Output
+*.exe
+*.obj
+*.o
+*.pdb
+*.ilk
+*.log
+*.ppm
+*.bmp
+*.png
+*.jpg
